@@ -264,6 +264,8 @@ if ($is_systemd) {
     } elsif ($distro eq 'ubuntu') {
         ### add update-rc.d if we are running on an ubuntu distro
         $cmds{'update-rc.d'} = $updatercdCmd;
+    } elsif ($distro eq 'void') {
+        $init_name = 'run';
     }
 
     unless (-d $init_dir) {
@@ -271,6 +273,8 @@ if ($is_systemd) {
             $init_dir = '/etc/rc.d/init.d';
         } elsif (-d '/etc/rc.d') {  ### for Slackware
             $init_dir = '/etc/rc.d';
+        } elsif (-d '/etc/sv') {  ### for Void
+            $init_dir = '/etc/sv/psad';
         } else {
             die "[*] Cannot find the init script directory, use ",
                 "--init-dir <path>" unless $install_test_dir;
@@ -759,18 +763,29 @@ sub install() {
             $init_file = 'init-scripts/psad-init.fedora';
         } elsif ($distro eq 'gentoo') {
             $init_file = 'init-scripts/psad-init.gentoo';
+        } elsif ($distro eq 'void') {
+            $init_file = 'init-scripts/psad-init.void';
         } else {
             $init_file = 'init-scripts/psad-init.generic';
         }
     }
 
     if ($init_dir and &is_root()) {
-        &logr("[+] Copying $init_file -> ${init_dir}/$init_name\n");
-        copy $init_file, "${init_dir}/$init_name" or die "[*] Could not copy ",
-            "$init_file -> ${init_dir}/$init_name: $!";
         if ($is_systemd) {
+            &logr("[+] Copying $init_file -> ${init_dir}/$init_name\n");
+            copy $init_file, "${init_dir}/$init_name" or die "[*] Could not copy ",
+                "$init_file -> ${init_dir}/$init_name: $!";
             &perms_ownership("${init_dir}/$init_name", 0644);
+        } elsif ($distro eq 'void') {
+            &full_mkdir('/etc/sv/psad', 0755);
+            &logr("[+] Copying $init_file -> ${init_dir}/$init_name\n");
+            copy $init_file, "${init_dir}/$init_name" or die "[*] Could not copy ",
+                "$init_file -> ${init_dir}/$init_name $!";
+	    &perms_ownership("${init_dir}/$init_name", 0755);
         } else {
+            &logr("[+] Copying $init_file -> ${init_dir}/$init_name\n");
+            copy $init_file, "${init_dir}/$init_name" or die "[*] Could not copy ",
+                "$init_file -> ${init_dir}/$init_name: $!";
             &perms_ownership("${init_dir}/$init_name", 0744);
         }
         &enable_psad_at_boot($distro);
@@ -791,6 +806,8 @@ sub install() {
         if ($init_dir) {
             if ($is_systemd) {
                 &logr("\n[+] To start psad, run \"$cmds{'systemctl'} start psad\"\n");
+            } elsif ($distro eq 'void') {
+                &logr("\n[+] To start psad, type \"sv start psad\"\n");
             } else {
                 &logr("\n[+] To start psad, run \"${init_dir}/psad start\"\n");
             }
@@ -952,6 +969,9 @@ sub uninstall() {
     if (-e "${init_dir}/psad") {
         print "[+] Removing ${init_dir}/$init_name\n";
         unlink "${init_dir}/$init_name";
+    } elsif ($distro eq 'void') {
+            &run_cmd("unlink /var/service/psad");
+            &run_cmd("rm -rf /etc/sv/psad");
     }
     if (-d $config{'PSAD_CONF_DIR'}) {
         print "[+] Removing configuration directory: $config{'PSAD_CONF_DIR'}";
@@ -1660,6 +1680,7 @@ sub get_distro() {
             return 'redhat' if $line =~ /red\s*hat/i;
             return 'fedora' if $line =~ /fedora/i;
             return 'ubuntu' if $line =~ /ubuntu/i;
+            return 'void' if $line =~ /Void/i;
         }
     }
     return 'NA';
@@ -1967,6 +1988,8 @@ sub enable_psad_at_boot() {
             &run_cmd("$cmds{'rc-update'} add $init_name default");
         } elsif ($distro eq 'ubuntu') {
             &run_cmd("$cmds{'update-rc.d'} $init_name defaults");
+        } elsif ($distro eq 'void') {
+            &run_cmd("ln -s /etc/sv/psad /var/service");
         } else {
 
             ### get the current run level
@@ -2006,6 +2029,8 @@ sub check_commands() {
                 if ($cmd eq 'runlevel') {
                     if ($runlevel > 0) {
                         next CMD;
+		    } elsif ($distro eq 'void') {
+			next CMD;
                     } else {
                         die "[*] Could not find the $cmd command, ",
                             "use --runlevel <N>";
@@ -2020,7 +2045,7 @@ sub check_commands() {
             return unless &is_root();
             die "\n[*] $cmd is located at ",
                 "$cmds{$cmd} but is not executable by uid: $<";
-        }
+	}
     }
     return;
 }
