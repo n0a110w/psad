@@ -1,0 +1,2 @@
+#!/bin/sh
+exec psad --no-daemon 2>&1
